@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ExodusPRO: AI Image Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary-dark': '#1e293b', // slate-800
+                        'secondary-dark': '#334155', // slate-700
+                        'accent-blue': '#3b82f6', // blue-500
+                        'accent-hover': '#2563eb', // blue-600
+                        'text-light': '#f8fafc', // slate-50
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+        .loading-dot {
+            animation: bounce 1s infinite alternate;
+        }
+        .loading-dot:nth-child(2) { animation-delay: 0.3s; }
+        .loading-dot:nth-child(3) { animation-delay: 0.6s; }
+        @keyframes bounce {
+            from { transform: translateY(0); }
+        }
+        /* Custom style to make star icons look like buttons on hover */
+        #star-rating > span {
+            cursor: pointer;
+            padding: 0 4px;
+            transition: transform 0.1s, color 0.1s;
+        }
+        #star-rating > span:hover {
+            transform: scale(1.15);
+        }
+    </style>
+</head>
+<body class="bg-gray-900 font-sans text-text-light min-h-screen p-4 sm:p-8 flex items-center justify-center">
+
+    <div id="app" class="w-full max-w-4xl bg-primary-dark p-6 sm:p-10 rounded-xl shadow-2xl border border-secondary-dark transition-all duration-300">
+        <!-- Header -->
+        <header class="text-center mb-8">
+            <h1 class="text-4xl sm:text-5xl font-extrabold text-accent-blue tracking-tight">Exodus<span class="text-text-light">PRO</span></h1>
+            <p class="mt-2 text-gray-400 text-lg">Generate stunning AI Images.</p>
+        </header>
+
+        <!-- Generation Controls (Simplified to Image-Only) -->
+        <div class="space-y-4 mb-8">
+            <!-- Prompt Input -->
+            <div class="relative">
+                <textarea id="prompt-input" rows="3" placeholder="A futuristic city on a purple planet, highly detailed, photorealistic, 8k, cinematic lighting"
+                    class="w-full p-4 pr-12 bg-secondary-dark border border-gray-600 rounded-lg focus:ring-accent-blue focus:border-accent-blue resize-none text-base placeholder-gray-500"></textarea>
+            </div>
+            
+            <!-- Generate Button (Now full width) -->
+            <button id="generate-button"
+                class="w-full p-3 font-semibold text-lg bg-accent-blue hover:bg-accent-hover rounded-lg transition duration-200 shadow-md shadow-blue-900 disabled:opacity-50 disabled:cursor-not-allowe[...]"
+                Generate Image
+            </button>
+        </div>
+
+        <!-- Result Display Area -->
+        <div id="result-container" class="min-h-[300px] bg-secondary-dark rounded-xl p-4 flex items-center justify-center relative overflow-hidden shadow-inner shadow-gray-900 border border-gray-700">
+            <p id="initial-message" class="text-gray-500 italic text-center p-4">Your generated image content will appear here.</p>
+            
+            <!-- Loading Indicator -->
+            <div id="loading-indicator" class="hidden absolute inset-0 bg-primary-dark/95 backdrop-blur-sm flex flex-col items-center justify-center p-4 transition-opacity duration-300">
+                <div class="flex space-x-2 mb-4">
+                    <div class="loading-dot w-3 h-3 bg-accent-blue rounded-full"></div>
+                    <div class="loading-dot w-3 h-3 bg-accent-blue rounded-full"></div>
+                    <div class="loading-dot w-3 h-3 bg-accent-blue rounded-full"></div>
+                </div>
+                <p id="loading-text" class="text-gray-300 text-lg font-medium"></p>
+                <p class="text-sm text-gray-500 mt-2">Generating complex visuals... please wait.</p>
+            </div>
+        </div>
+        
+        <!-- Rating Prompt (NEW) -->
+        <div id="rating-prompt" class="hidden w-full mt-4 p-4 bg-secondary-dark rounded-xl shadow-lg border border-gray-700 flex flex-col items-center">
+            <p class="text-lg font-semibold mb-3">How would you rate this result?</p>
+            <div id="star-rating" class="flex space-x-2 text-3xl">
+                <!-- Stars will be inserted here by JavaScript -->
+            </div>
+            <p id="rating-message" class="text-gray-400 mt-2 text-sm transition-opacity opacity-0"></p>
+        </div>
+
+        <!-- Status Message Box -->
+        <div id="status-message" class="hidden mt-4 p-3 rounded-lg text-sm transition-all duration-300"></div>
+        
+        <!-- Licensing Disclaimer (NEW) -->
+        <div class="mt-6 pt-4 border-t border-gray-700 text-center">
+            <p class="text-xs text-gray-500 italic">
+                Disclaimer: The user is solely responsible for the content generated from their prompts. If the resulting images or videos contain **licensed, trademarked, or copyrighted material**, t[...]n            </p>
+        </div>
+
+    </div>
+
+    <script type="module">
+        // Global variables provided by the environment (must be used)
+        // NOTE: This file now embeds the Gemini API key as provided by the repository owner.
+        // Security reminder: embedding keys in client-side code is insecure; prefer a server-side proxy.
+        const apiKey = "AIzaSyB8tYytbyoOEnuN8mHi0b87yC4YsR4D7J4";
+        
+        // State to store the content ready for download (base64 URL or text data)
+        let currentGeneratedContent = null; 
+        let currentGeneratedType = null; // Always 'image' now
+
+        // --- DOM Elements ---
+        const promptInput = document.getElementById('prompt-input');
+        // Removed outputTypeSelect
+        const generateButton = document.getElementById('generate-button');
+        const resultContainer = document.getElementById('result-container');
+        const initialMessage = document.getElementById('initial-message');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const loadingText = document.getElementById('loading-text');
+        const statusMessage = document.getElementById('status-message');
+        
+        // New Rating DOM Elements
+        const ratingPrompt = document.getElementById('rating-prompt');
+        const starRating = document.getElementById('star-rating');
+        const ratingMessage = document.getElementById('rating-message');
+        
+        // --- Utility Functions ---
+
+        /**
+         * Displays a status message to the user.
+         * @param {string} message - The message to display.
+         * @param {'success'|'error'|'info'} type - The type of message.
+         */
+        function showStatus(message, type) {
+            statusMessage.textContent = message;
+            statusMessage.className = 'mt-4 p-3 rounded-lg text-sm transition-all duration-300'; // Reset classes
+            
+            if (type === 'error') {
+                statusMessage.classList.add('bg-red-900', 'text-red-300', 'border', 'border-red-700');
+            } else if (type === 'success') {
+                statusMessage.classList.add('bg-green-900', 'text-green-300', 'border', 'border-green-700');
+            } else {
+                statusMessage.classList.add('bg-blue-900', 'text-blue-300', 'border', 'border-blue-700');
+            }
+            statusMessage.classList.remove('hidden');
+        }
+
+        /**
+         * Clears the result container and initial message, and removes any previous content.
+         */
+        function clearResults() {
+            resultContainer.innerHTML = '';
+            resultContainer.appendChild(initialMessage);
+            initialMessage.classList.remove('hidden');
+            statusMessage.classList.add('hidden');
+            ratingPrompt.classList.add('hidden'); // Hide rating prompt
+            currentGeneratedContent = null;
+            currentGeneratedType = null;
+        }
+
+        /**
+         * Core fetch utility with exponential backoff for retries.
+         */
+        async function fetchWithBackoff(url, options, maxRetries = 5) {
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    const response = await fetch(url, options);
+                    if (response.ok) {
+                        return response;
+                    } else if (response.status === 429 || response.status >= 500) {
+                        // Retry on Rate Limit (429) or Server Error (5xx)
+                        if (attempt < maxRetries - 1) {
+                            const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                            console.warn(`Retrying API call (Attempt ${attempt + 1}/${maxRetries})...`);
+                        } else {
+                            throw new Error(`API failed after ${maxRetries} attempts with status ${response.status}.`);
+                        }
+                    } else {
+                        // Don't retry on client errors (4xx other than 429)
+                        const errorBody = await response.json();
+                        throw new Error(`API error: ${response.statusText}. Details: ${JSON.stringify(errorBody)}`);
+                    }
+                } catch (error) {
+                    if (attempt === maxRetries - 1 || !error.message.includes('API failed')) {
+                        throw error;
+                    }
+                }
+            }
+        }
+        
+        // --- Rating Functions ---
+
+        /**
+         * Renders the 5-star rating control and attaches listeners.
+         * @param {'image'} contentType - The type of content that was just generated (always image now).
+         */
+        function showRatingPrompt(contentType) {
+            starRating.innerHTML = '';
+            ratingMessage.textContent = '';
+            ratingMessage.classList.add('opacity-0');
+            ratingPrompt.classList.remove('hidden');
+
+            // Create 5 stars
+            for (let i = 1; i <= 5; i++) {
+                const star = document.createElement('span');
+                star.innerHTML = '&#9733;'; // Unicode star symbol
+                star.classList.add('text-gray-600', 'transition-colors', 'duration-150');
+                star.dataset.rating = i;
+                
+                // Use a single click handler to submit the rating
+                star.addEventListener('click', () => handleRatingSubmission(i, contentType));
+                
+                // Add hover effect logic for visual feedback
+                star.addEventListener('mouseover', () => {
+                    const stars = starRating.children;
+                    for (let j = 0; j < stars.length, body: JSON.stringify(payload)
+            };
+
+            const response = await fetchWithBackoff(apiUrl, options);
+            const result = await response.json();
+
+            const base64Data = result?.predictions?.[0]?.bytesBase64Encoded;
+
+            if (base64Data) {
+                const imageUrl = `data:image/png;base64,${base64Data}`;
+                
+                // Set global state for consistency
+                currentGeneratedContent = imageUrl;
+                currentGeneratedType = 'image';
+                
+                // Clear and display image
+                clearResults();
+                initialMessage.classList.add('hidden'); // Hide the message as content is present
+                const img = document.createElement('img');
+                img.src = imageUrl;
+                img.alt = prompt;
+                img.className = 'w-full h-auto max-h-[500px] object-contain rounded-lg shadow-lg';
+                resultContainer.appendChild(img);
+                
+                showStatus('Generation complete. Please rate the content below.', 'info');
+                showRatingPrompt('image'); // Show rating prompt on success
+
+            } else {
+                console.error("API response missing image data:", result);
+                showStatus('Error: Failed to retrieve image data from the AI model. Try a different prompt.', 'error');
+            }
+        }
+        
+        // Removed generateVideoMock function.
+
+        // --- Main Handler ---
+
+        async function handleGeneration() {
+            const prompt = promptInput.value.trim();
+            // Output type is implicitly 'image' now.
+            
+            if (!prompt) {
+                showStatus('Please enter a detailed prompt to generate content.', 'error');
+                return;
+            }
+
+            // Disable button and show loading state
+            generateButton.disabled = true;
+            loadingIndicator.classList.remove('hidden');
+            initialMessage.classList.add('hidden'); // Hide the initial message while loading
+            ratingPrompt.classList.add('hidden'); // Hide rating prompt if re-generating
+            statusMessage.classList.add('hidden'); // Hide previous status message
+
+            try {
+                // Call image generator directly as it is the only supported feature.
+                await generateImage(prompt);
+            } catch (error) {
+                console.error("Generation Error:", error);
+                showStatus(`A critical error occurred during generation: ${error.message}`, 'error');
+            } finally {
+                // Hide loading and re-enable button
+                loadingIndicator.classList.add('hidden');
+                generateButton.disabled = false;
+            }
+        }
+
+        // --- Initialization and Event Binding ---
+        window.onload = function() {
+            // Bind the generate function
+            generateButton.addEventListener('click', handleGeneration);
+            
+            // Clear results on load to ensure initial state is clean
+            clearResults();
+            initialMessage.classList.remove('hidden'); // Ensure initial message is visible on load
+        };
+    </script>
+</body>
+</html>
